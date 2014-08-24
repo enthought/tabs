@@ -7,9 +7,11 @@ from functools import partial
 import matplotlib
 matplotlib.use('Agg')
 
+import matplotlib.pyplot as plt
+import netCDF4 as netCDF
 import numpy as np
 from mpl_toolkits.basemap import Basemap
-import netCDF4 as netCDF
+from shapely.geometry import LineString, MultiLineString
 
 from octant_lite import rot2d, shrink
 
@@ -49,6 +51,7 @@ class THREDDSFrameSource(object):
                                area_thresh=0.)
 
         self._configure_velocity_grid()
+        self._configure_salt_grid()
 
     def _configure_velocity_grid(self):
 
@@ -78,6 +81,17 @@ class THREDDSFrameSource(object):
             'lon': lon[self.velocity_idx, self.velocity_idy],
             'lat': lat[self.velocity_idx, self.velocity_idy]}
 
+    def _configure_salt_grid(self):
+        self.salt_lon = self.nc.variables['lon_rho'][:]
+        self.salt_lat = self.nc.variables['lat_rho'][:]
+
+        # FIXME: What about this mask thing?
+        # self.salt_mask = self.nc.variables['mask_rho'][:]
+
+        # # We don't need to decimate or shuffle this because we're going to be
+        # # shipping out derived contour lines
+        # self.salt_idx, self.salt_idy = mask.nonzero()
+
     def velocity_frame(self, frame_number):
         u = self.nc.variables['u'][frame_number, -1, :, :]
         v = self.nc.variables['v'][frame_number, -1, :, :]
@@ -88,6 +102,54 @@ class THREDDSFrameSource(object):
                   'u': u[self.velocity_idx, self.velocity_idy],
                   'v': v[self.velocity_idx, self.velocity_idy]}
         return vector
+
+    def salt_frame(self, frame_number, num_levels=10):
+        salt = self.nc.variables['salt'][frame_number, 0, :, :]
+        salt_range = (salt.max() - salt.min()) * 0.05
+        # levels = np.logspace(
+            # np.log(salt.min() - salt_range),
+            # np.log(salt.max() + salt_range),
+            # num_levels, True, np.exp(1))
+        levels = np.linspace(
+            (salt.min() - salt_range),
+            (salt.max() + salt_range),
+            num_levels)
+
+        plt.figure()
+        contours = plt.contour(self.salt_lon, self.salt_lat, salt, levels,
+                               extend='both')
+        geojson = self.contours_to_geoJSON(contours)
+        plt.close()
+
+        idx = ~salt.mask
+        values = {'lat': self.salt_lat[idx].round(4).tolist(),
+                  'lng': self.salt_lon[idx].round(4).tolist(),
+                  'salt': salt[idx].round(4).tolist(),
+                  'min': float(salt[idx].min()),
+                  'max': float(salt[idx].max())}
+
+        frame = {'date': self.dates[frame_number].isoformat(),
+                 'contours': geojson,
+                 'values': values}
+
+        return frame
+
+    def contours_to_geoJSON(self, contours):
+        features = []
+        for collection, cvalue in zip(contours.collections, contours.cvalues):
+            line_strings = [LineString(coords)
+                            for path in collection.get_paths()
+                            for coords in path.to_polygons()]
+            mls = MultiLineString(line_strings)
+            feat = {'type': 'Feature',
+                    'properties': {'color': collection.get_color()[0].tolist(),
+                                   'cvalue': cvalue},
+                    'geometry': mls.__geo_interface__}
+
+            features.append(feat)
+
+        geojson = {'type': 'FeatureCollection', 'features': features}
+        return geojson
 
     def __del__(self):
         """docstring for __del__"""

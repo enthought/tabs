@@ -13,29 +13,46 @@ API = (function(Config, $) {
         }
     }
 
-    function withVelocityFrameJSON(frame, callback) {
-        withJSON(urlForVelocityFrame(frame), callback);
+    function withVelocityFrameJSON(options, callback) {
+        withJSON(urlForVelocityFrame(options), callback);
     }
 
 
-    function withVelocityGridLocationsJSON(callback) {
+    function withVelocityGridLocationsJSON(options, callback) {
         withJSON(Config.velocityGridLocationsURL, callback);
     }
 
+    function withSaltFrameJSON(options, callback) {
+        withJSON(urlForSaltFrame(options), callback);
+    }
 
     return {
         withJSON: withJSON,
         withVelocityFrameJSON: withVelocityFrameJSON,
         withVelocityGridLocationsJSON: withVelocityGridLocationsJSON,
+        withSaltFrameJSON: withSaltFrameJSON
     };
 
 
     // Private functions
 
-    function urlForVelocityFrame(frame) {
+    function urlForVelocityFrame(options) {
+        if (options.frame === undefined) {
+            console.log('options.frame undefined (default 0)');
+            options.frame = 0;
+        }
         url = Config.velocityFrameURL;
-        return url + frame;
+        return url + options.frame;
     }
 
+    function urlForSaltFrame(options) {
+        if (options.frame === undefined) {
+            console.log('options.frame undefined (default 0)');
+            options.frame = 0;
+        }
+        var url = Config.saltFrameURL;
+        var query = $.query.set('numSaltLevels', options.numSaltLevels);
+        return url + options.frame + query;
+    }
 
 }(Config, jQuery));
