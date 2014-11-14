@@ -17,6 +17,9 @@ var VelocityView = (function($, L, Models, Config) {
         // Degrees!
         arrowHeadAngle: Config.arrowHeadAngle,
 
+        // Number of vectors at full zoom
+        vectorDensity: Config.vectorDensity,
+
         // Vector artist parameters
         color: 'black',
         weight: 1
@@ -58,10 +61,16 @@ var VelocityView = (function($, L, Models, Config) {
 
         // put the initial velocity vectors on the map
         this.vfs.withVelocityGridLocations({}, function(points) {
-            self.points = points;
+
+            var zoom = this.mapView.map.getZoom();
+            var displayPoints = Math.ceil(self.vectorDensity * Math.pow(4, zoom - this.mapView.minZoom));
+            displayPoints = Math.min(displayPoints, points.length);
+            console.log('show', displayPoints, 'at zoom level', zoom);
+
+            self.points = points.slice(0, displayPoints);
 
             var options = {frame: mapView.currentFrame,
-                           points: points,
+                           points: self.points,
                            mapScale: mapView.mapScale()};
             self.vfs.withVelocityFrame(options, function(data) {
                 var vectors = data.vectors;
@@ -75,6 +84,17 @@ var VelocityView = (function($, L, Models, Config) {
         return this;
     };
 
+
+    VelocityView.prototype.removeFrom = function removeFrom(mapView) {
+        var self = this;
+
+        this.mapView = mapView;
+
+        // Clear the vector layers
+        this.vectorGroup.clearLayers()
+
+        return this;
+    };
 
     VelocityView.prototype.redraw = function redraw(callback) {
         var self = this;
