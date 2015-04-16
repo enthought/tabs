@@ -89,6 +89,7 @@ MapView = (function($, L, Models, Config) {
         // Add visualization layers
         self.saltView = SaltView.saltView(config).addTo(self);
         self.velocityView = VelocityView.velocityView(config).addTo(self);
+        self.particleView = ParticleView.particleView(config).addTo(self);
 
         self.redraw();
 
@@ -187,6 +188,17 @@ MapView = (function($, L, Models, Config) {
                     self.tabsControl && self.tabsControl.updateInfo(
                         {frame: self.currentFrame, date: data.date,
                          numSaltLevels: self.saltView.numSaltLevels});
+                        callback && callback(data);
+                }
+            );
+        }
+
+        if (this.visibleLayers.particles) {
+            this.particleView && this.particleView.redraw(
+                function particle_call(data) {
+                    self.tabsControl && self.tabsControl.updateInfo(
+                        // FIXME: particle JSON data doesn't have date
+                        {frame: self.currentFrame});
                         callback && callback(data);
                 }
             );
