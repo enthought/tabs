@@ -15,10 +15,13 @@ MapView = (function($, L, Models, Config) {
         runState: RUN_STOPPED,
 
         // Use forecast or hindcast data?
-        dataSource: 'hindcast',
+        datasource: Config.datasource,
 
         // Number of time steps to use
         nFrames: Config.nFrames,
+
+        // Offset in index to request from API from current frame number
+        frameOffset: 0,
 
         // Initial zoom level
         minZoom: Config.minZoom,
@@ -97,13 +100,21 @@ MapView = (function($, L, Models, Config) {
                 return this.container;
             },
             updateText: function() {
-                console.log('Switch data source to', self.dataSource);
-                self.dataSourceButton.container.innerHTML = self.dataSource;
+                console.log('Switch data source to', self.datasource);
+                self.datasourceButton.container.innerHTML = self.datasource;
             }
 
         });
-        self.dataSourceButton = new L.Control.Toggle;
-        self.dataSourceButton.addTo(self.map);
+        self.datasourceButton = new L.Control.Toggle();
+        self.datasourceButton.addTo(self.map);
+
+        self.pickerControl = L.control.datetimePickerControl({
+            onChangeDate: function(e) {
+                self.setStartDate(e.date.getTime() / 1e3);
+            }
+        });
+        self.map.addControl(self.pickerControl);
+        self.pickerControl.startPicker();
 
         self.sliderControl = L.control.sliderControl({
             minValue: 0,
@@ -135,10 +146,7 @@ MapView = (function($, L, Models, Config) {
         };
 
         // Load timestamps for all frames
-        var options = {datasource: self.dataSource};
-        API.withFrameTimestamps(options, function(data) {
-            self.timestamps = data.timestamps;
-        });
+        self.updateTimeStamps({updateStartTime: true});
 
         // Add visualization layers
         if (Config.enableSalinity) {
@@ -157,6 +165,27 @@ MapView = (function($, L, Models, Config) {
 
     };
 
+
+    MapView.prototype.setStartDate = function setStartDate(startDate) {
+        var self = this;
+        // startDate is in epoch seconds, not milliseconds
+        var ts = self.timestamps,
+            frameOffset = 0;
+        var lastFrame = ts.length - 1;
+        for (frameOffset = 0; frameOffset <= lastFrame; frameOffset++) {
+            if (ts[frameOffset] > startDate) {
+                break;
+            }
+        }
+        self.frameOffset = Math.max(0, frameOffset - 1);
+        self.currentFrame = 0;
+        // This gets set in milliseconds
+        self.pickerControl.value(ts[self.frameOffset] * 1e3);
+        self.nFrames = Math.min(Config.nFrames, 1 + lastFrame - self.frameOffset);
+        self.redraw();
+    };
+
+
     MapView.prototype.toggleRunState = function toggleRunState() {
         var self = this;
         if (self.runState !== RUN_FOREVER) {
@@ -166,30 +195,37 @@ MapView = (function($, L, Models, Config) {
         }
     };
 
+
     MapView.prototype.changeDataSource = function changeDataSource() {
         var self = this;
-        if (self.dataSource !== 'hindcast') {
-            self.dataSource = 'hindcast';
+        if (self.datasource !== 'hindcast') {
+            self.datasource = 'hindcast';
         } else {
-            self.dataSource = 'forecast';
+            self.datasource = 'forecast';
         }
-        self.start(RUN_SYNC);
         // clear vector cache
-        self.velocityView.clearCache();
+        self.velocityView && self.velocityView.clearCache();
+        if (self.visibleLayers.velocity) {
+            self.velocityView && self.velocityView.resetGrid();
+        }
+        self.updateTimeStamps();
+        self.start(RUN_SYNC);
+    };
+
+
+    MapView.prototype.updateTimeStamps = function updateTimeStamps(options) {
+        var self = this;
         // reload timestamps for all frames
-        var options = {datasource: self.dataSource};
+        options = $.extend(options, {datasource: self.datasource});
         API.withFrameTimestamps(options, function(data) {
             self.timestamps = data.timestamps;
-            // reset the number of frames
-            self.nFrames = self.timestamps.length;
-            self.tabsControl.nFrames = self.nFrames;
+            // Choose most recent window
+            var startIdx = Math.max(0, self.timestamps.length - self.nFrames);
+            var startDate = self.timestamps[startIdx];
+            self.setStartDate(startDate);
         });
-        self.currentFrame = 0;
-        if (self.visibleLayers.velocity) {
-            self.velocityView && self.velocityView.resetGrid()
-            self.redraw();
-        }
     };
+
 
     MapView.prototype.queueFrame = function queueFrame(i) {
         var self = this;
@@ -304,9 +340,14 @@ MapView = (function($, L, Models, Config) {
         if (self.visibleLayers.velocity) {
             self.velocityView && self.velocityView.redraw(
                 function vv_call(data) {
-                    self.tabsControl && self.tabsControl.updateInfo(
-                        {frame: self.currentFrame, date: data.date});
-                        callback && callback(data);
+                    if (self.tabsControl) {
+                        self.tabsControl.updateInfo({
+                            frame: self.currentFrame,
+                            nFrames: self.nFrames,
+                            date: data.date
+                        });
+                    }
+                    callback && callback(data);
                 }
             );
         }
@@ -344,9 +385,9 @@ MapView = (function($, L, Models, Config) {
     function renderDate(d) {
         var day_month_year = [d.getUTCDate().padLeft(),
                               Config.monthStrings[d.getUTCMonth()],
-                              d.getFullYear()].join(' '),
-            hour_min = [d.getHours().padLeft(),
-                        d.getMinutes().padLeft()].join(':');
+                              d.getUTCFullYear()].join(' '),
+            hour_min = [d.getUTCHours().padLeft(),
+                        d.getUTCMinutes().padLeft()].join(':');
         return day_month_year + ' ' + hour_min + ' UTC';
     }
 
